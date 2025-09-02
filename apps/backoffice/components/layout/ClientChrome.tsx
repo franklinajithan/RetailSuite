@@ -1,4 +1,4 @@
-"use client"
+"use client";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import Topbar from "./Topbar";
@@ -21,10 +21,13 @@ export default function ClientChrome({ children }: { children: React.ReactNode }
 
   return (
     <>
-      <Topbar onMenu={() => setOpen((v) => !v)} />
+      {/* <Topbar onMenu={() => setOpen((v) => !v)} /> */}
       <div className="flex">
         <Sidebar show={open} />
-        <main className="flex-1 p-4 md:p-6"><CommandPalette />{children}</main>
+        <main className="flex-1 p-4 md:p-6">
+          <CommandPalette />
+          {children}
+        </main>
       </div>
     </>
   );

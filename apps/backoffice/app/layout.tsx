@@ -1,10 +1,11 @@
- BackofficeTopBar from "@/components/BackofficeTopBar"
+﻿import BackofficeTopBar from "@/components/BackofficeTopBar"
 import ClientChrome from '@/components/layout/ClientChrome'
+import "./globals.css";
 
-export const metadata = {
-  title: 'Retail Backoffice',
-  description: 'Professional CRM Backoffice'
-}
+// export const metadata = {
+//   title: 'Retail Backoffice',
+//   description: 'Professional CRM Backoffice'
+// }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
