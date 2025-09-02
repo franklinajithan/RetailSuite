@@ -1,0 +1,15 @@
+{
+    "name":  "@retail/monorepo",
+    "private":  true,
+    "scripts":  {
+                    "Start" : "pnpm --filter @retail/backoffice dev",
+                    "dev":  "turbo run dev",
+                    "build":  "turbo run build",
+                    "db:generate":  "pnpm --filter @retail/backoffice drizzle-kit generate",
+                    "db:push":  "pnpm --filter @retail/backoffice drizzle-kit push",
+                    "db:seed":  "pnpm --filter @retail/backoffice tsx apps/backoffice/db/seed.ts"
+                },
+    "devDependencies":  {
+                            "turbo":  "2.0.6"
+                        }
+}

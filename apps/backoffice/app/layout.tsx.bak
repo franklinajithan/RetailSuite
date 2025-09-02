@@ -1,0 +1,17 @@
+import './globals.css'
+import ClientChrome from '@/components/layout/ClientChrome'
+
+export const metadata = {
+  title: 'Retail Backoffice',
+  description: 'Professional CRM Backoffice'
+}
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang='en'>
+      <body>
+        <ClientChrome>{children}</ClientChrome>
+      </body>
+    </html>
+  )
+}
