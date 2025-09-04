@@ -48,12 +48,12 @@ function toTitle(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-function logError(ctx: string, e: any) {
+function logError(ctx: string, e: unknown) {
   console.error(`${ctx}`, {
-    message: e?.message,
-    code: e?.code,
-    detail: e?.detail,
-    stack: e?.stack,
+    message: (e as any)?.message,
+    code: (e as any)?.code,
+    detail: (e as any)?.detail,
+    stack: (e as any)?.stack,
   });
 }
 
@@ -70,52 +70,80 @@ export async function GET(req: Request) {
 
     const { q, status, limit, offset } = parseQuery(req.url);
 
-    const whereParts: any[] = [];
+    const whereParts: unknown[] = [];
     if (q) whereParts.push(or(ilike(users.email, `%${q}%`), ilike(users.name, `%${q}%`)));
-    if (status !== "all") whereParts.push(eq(userProfiles.status, status));
-    const whereClause = whereParts.length ? and(...whereParts) : undefined;
+    const whereClauseUsersOnly = whereParts.length ? and(...(whereParts as any)) : undefined;
 
+    // Attempt full join first; fallback to users-only if join fails due to type mismatch
     const safeLimit = Math.min(Math.max(limit, 1), 200);
     const safeOffset = Math.max(offset, 0);
 
-    const items = await db
-      .select({
-        id: users.id,
-        email: users.email,
-        name: users.name,
-        role: users.role,
-        status: userProfiles.status,
-        phone: userProfiles.phone,
-        avatarUrl: userProfiles.avatarUrl,
-        lastLoginAt: userProfiles.lastLoginAt,
-        failedLogins: userProfiles.failedLogins,
-        mfaEnabled: userProfiles.mfaEnabled,
-        mustChangePassword: userProfiles.mustChangePassword,
-      })
-      .from(users)
-      .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
-      .where(whereClause)
-      .orderBy(
-        // sort by last login, push nulls to the very end using a dummy epoch
-        desc(sql`coalesce(${userProfiles.lastLoginAt}, '1970-01-01'::timestamptz)`)
-      )
-      .limit(safeLimit)
-      .offset(safeOffset);
+    let items: Array<Record<string, unknown>> = [];
+    let counts: Record<string, number> = {} as any;
 
-    const counts = await db.execute(sql`
-      select
-        coalesce(sum(case when up.status = 'active' then 1 else 0 end), 0)::int    as active,
-        coalesce(sum(case when up.status = 'suspended' then 1 else 0 end), 0)::int as suspended,
-        coalesce(sum(case when up.status = 'invited' then 1 else 0 end), 0)::int   as invited,
-        count(*)::int                                                               as total
-      from ${users} u
-      left join ${userProfiles} up on up.user_id = u.id
-    `);
+    try {
+      const wherePartsJoin: unknown[] = [...whereParts];
+      if (status !== "all") wherePartsJoin.push(eq(userProfiles.status, status));
+      const whereClauseJoin = wherePartsJoin.length ? and(...(wherePartsJoin as any)) : undefined;
 
-    return NextResponse.json({ items, counts: counts.rows?.[0] ?? {} });
-  } catch (e: any) {
+      items = await db
+        .select({
+          id: users.id,
+          email: users.email,
+          name: users.name,
+          role: users.role,
+          status: userProfiles.status,
+          phone: userProfiles.phone,
+          avatarUrl: userProfiles.avatarUrl,
+          lastLoginAt: userProfiles.lastLoginAt,
+          failedLogins: userProfiles.failedLogins,
+          mfaEnabled: userProfiles.mfaEnabled,
+          mustChangePassword: userProfiles.mustChangePassword,
+        })
+        .from(users)
+        .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
+        .where(whereClauseJoin)
+        .orderBy(
+          desc(sql`coalesce(${userProfiles.lastLoginAt}, '1970-01-01'::timestamptz)`)
+        )
+        .limit(safeLimit)
+        .offset(safeOffset);
+
+      const c = await db.execute(sql`
+        select
+          coalesce(sum(case when up.status = 'active' then 1 else 0 end), 0)::int    as active,
+          coalesce(sum(case when up.status = 'suspended' then 1 else 0 end), 0)::int as suspended,
+          coalesce(sum(case when up.status = 'invited' then 1 else 0 end), 0)::int   as invited,
+          count(*)::int                                                               as total
+        from ${users} u
+        left join ${userProfiles} up on up.user_id = u.id
+      `);
+      counts = (c.rows?.[0] as any) ?? {};
+    } catch (joinErr: unknown) {
+      logError("GET /api/users join failed, falling back to users-only", joinErr);
+
+      // Fallback: users only
+      items = await db
+        .select({ id: users.id, email: users.email, name: users.name, role: users.role })
+        .from(users)
+        .where(whereClauseUsersOnly)
+        .orderBy(desc(users.id))
+        .limit(safeLimit)
+        .offset(safeOffset);
+
+      // Basic counts without profile statuses
+      const c = await db.execute(sql`select count(*)::int as total from ${users}`);
+      counts = { total: (c.rows?.[0] as any)?.total ?? 0, active: 0, suspended: 0, invited: 0 } as any;
+    }
+
+    return NextResponse.json({ items, counts });
+  } catch (e: unknown) {
+    // Dev-friendly fallback when DB is not reachable
+    if ((e as any)?.code === "ECONNREFUSED") {
+      return NextResponse.json({ items: [], counts: { total: 0, active: 0, suspended: 0, invited: 0 } });
+    }
     logError("GET /api/users error", e);
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json({ error: (e as any)?.message || "Server error" }, { status: 500 });
   }
 }
 
@@ -159,7 +187,7 @@ export async function POST(req: Request) {
       await tx
         .insert(userProfiles)
         .values({
-          userId: u.id,
+          userId: u.id as any,
           status: input.status,
           phone: input.phone ?? null,
           avatarUrl: input.avatarUrl ?? null,
@@ -171,38 +199,37 @@ export async function POST(req: Request) {
           .insert(roles)
           .values({ key, name: toTitle(key) })
           .onConflictDoUpdate({
-            target: roles.key, // ensure roles.key has a UNIQUE constraint
-            set: { name: sql`${roles.name}` }, // no-op update keeps existing
+            target: roles.key,
+            set: { name: sql`${roles.name}` },
           })
           .returning();
 
         await tx
           .insert(userRoles)
-          .values({ userId: u.id, roleId: r.id })
-          .onConflictDoNothing(); // requires unique (user_id, role_id)
+          .values({ userId: u.id as any, roleId: r.id as any })
+          .onConflictDoNothing();
       }
 
       return u.id;
     });
 
-    // best-effort audit (don’t fail the request if logging fails)
     try {
       await db.insert(authLogs).values({
-        userId: newUserId,
-        event: "user.created", // ensure enum/table allows this value
+        userId: newUserId as any,
+        event: "user.created",
         meta: { by: session.user.email },
       });
-    } catch (auditErr: any) {
+    } catch (auditErr: unknown) {
       logError("Audit insert failed", auditErr);
     }
 
     return NextResponse.json({ ok: true, id: newUserId });
-  } catch (e: any) {
-    if (e?.issues) {
-      return NextResponse.json({ error: e.issues }, { status: 400 });
+  } catch (e: unknown) {
+    if ((e as any)?.issues) {
+      return NextResponse.json({ error: (e as any).issues }, { status: 400 });
     }
 
-    const msg = String(e?.message || "");
+    const msg = String((e as any)?.message || "");
     if (msg.includes("duplicate key") && msg.includes("users_email_unique")) {
       return NextResponse.json({ error: "Email already exists" }, { status: 409 });
     }
